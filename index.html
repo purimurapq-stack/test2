@@ -1,0 +1,136 @@
+
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Cache-Control" content="no-cache">
+  <title>YouTube品質調査TOOL</title>
+  <style>
+    body { -webkit-text-size-adjust: 100%; font-family: sans-serif; }
+    .status { border: solid 1px #ccc; height: 20px; width: 600px; background: #eee; }
+    #log_text { border: solid 1px #ccc; height: 600px; width: 600px; background: #eee; font-size: 8pt; }
+    #video_url { width: 500px; }
+  </style>
+</head>
+<body>
+  <h1>YouTube品質調査TOOL</h1>
+
+  <div>
+    <label for="video_url">YouTube動画URL</label><br>
+    <input id="video_url" type="url" placeholder="https://www.youtube.com/watch?v=...">
+    <button type="button" onclick="loadVideoFromUrl()">この動画を読み込む</button>
+  </div>
+  <p id="message" aria-live="polite"></p>
+
+  <div id="ytplayer"></div>
+  <p>
+    <button type="button" onclick="startLoop()">START</button>
+    <button type="button" onclick="stopLoop()">STOP</button>
+  </p>
+
+  <div>現在時刻</div><div id="area1" class="status"></div>
+  <div>バッファ済みの動画の割合</div><div id="loaded" class="status"></div>
+  <div>プレーヤーの状態</div><div id="status" class="status"></div>
+  <div>再生開始からの経過時間</div><div id="time" class="status"></div>
+  <div>現在の画質</div><div id="current" class="status"></div>
+  <div>設定可能な画質</div><div id="levels" class="status"></div>
+  <div>計測ログ</div>
+  <textarea id="log_text" readonly></textarea><br>
+  <button type="button" onclick="copyLog()">ログをコピー</button>
+
+  <script>
+    let player;
+    let intervalId;
+    let pendingVideoId = '';
+
+    const script = document.createElement('script');
+    script.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(script);
+
+    function getVideoId(url) {
+      try {
+        const parsed = new URL(url.trim());
+        if (parsed.hostname === 'youtu.be') return parsed.pathname.slice(1).split('/')[0];
+        if (parsed.hostname.endsWith('youtube.com')) {
+          return parsed.searchParams.get('v') || parsed.pathname.match(/^\/(?:embed|shorts|live)\/([^/?]+)/)?.[1] || '';
+        }
+      } catch (_) { }
+      return '';
+    }
+
+    function loadVideoFromUrl() {
+      const url = document.getElementById('video_url').value;
+      const videoId = getVideoId(url);
+      if (!videoId) {
+        document.getElementById('message').textContent = '有効なYouTube動画URLを入力してください。';
+        return;
+      }
+      pendingVideoId = videoId;
+      document.getElementById('message').textContent = '動画を読み込みました。';
+      if (player && player.loadVideoById) player.loadVideoById(videoId);
+    }
+
+    function onYouTubeIframeAPIReady() {
+      player = new YT.Player('ytplayer', {
+        height: '360', width: '640',
+        playerVars: { playsinline: 1 },
+        events: { onReady: onPlayerReady, onStateChange: onPlayerStateChange }
+      });
+    }
+
+    function onPlayerReady(event) {
+      if (pendingVideoId) event.target.loadVideoById(pendingVideoId);
+    }
+
+    function onPlayerStateChange(event) {
+      if (event.data === YT.PlayerState.BUFFERING || event.data === YT.PlayerState.PLAYING) {
+        event.target.setPlaybackQuality('hd2160');
+      }
+      updateQualityInfo();
+    }
+
+    function startLoop() {
+      if (!player || !player.playVideo) return;
+      player.playVideo();
+      clearInterval(intervalId);
+      intervalId = setInterval(updateDisplay, 1000);
+      updateDisplay();
+    }
+
+    function stopLoop() {
+      if (player && player.pauseVideo) player.pauseVideo();
+      clearInterval(intervalId);
+    }
+
+    function updateDisplay() {
+      const now = new Date();
+      document.getElementById('area1').textContent = now.toString();
+      const status = getPlayStatus();
+      updateQualityInfo();
+      document.getElementById('log_text').value = `${now},${status}\n` + document.getElementById('log_text').value;
+      if (status === '終了' && player && player.playVideo) player.playVideo();
+    }
+
+    function getPlayStatus() {
+      if (!player || !player.getPlayerState) return '未開始';
+      const loaded = player.getVideoLoadedFraction();
+      document.getElementById('loaded').textContent = `${Math.floor(loaded * 100)}%`;
+      const names = { '-1': '未開始', 0: '終了', 1: '再生中', 2: '停止', 3: 'バッファリング中', 5: '頭出し済み' };
+      const status = names[player.getPlayerState()] || '不明';
+      document.getElementById('status').textContent = status;
+      document.getElementById('time').textContent = `${player.getCurrentTime()}秒`;
+      return status;
+    }
+
+    function updateQualityInfo() {
+      if (!player || !player.getVideoLoadedFraction || player.getVideoLoadedFraction() <= 0) return;
+      document.getElementById('levels').textContent = player.getAvailableQualityLevels().join(' , ');
+      document.getElementById('current').textContent = player.getPlaybackQuality();
+    }
+
+    async function copyLog() {
+      await navigator.clipboard.writeText(document.getElementById('log_text').value);
+    }
+  </script>
+</body>
+</html>
