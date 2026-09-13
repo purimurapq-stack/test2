@@ -17,7 +17,7 @@
 
   <div>
     <label for="video_url">YouTube動画URL</label><br>
-    <input id="video_url" type="url" placeholder="https://www.youtube.com/watch?v=...">
+    <input id="video_url" type="url" value="https://www.youtube.com/watch?v=VM18f-IIUTw" placeholder="https://www.youtube.com/watch?v=...">
     <button type="button" onclick="loadVideoFromUrl()">この動画を読み込む</button>
   </div>
   <p id="message" aria-live="polite"></p>
@@ -41,7 +41,7 @@
   <script>
     let player;
     let intervalId;
-    let pendingVideoId = '';
+    let pendingVideoId = 'VM18f-IIUTw';
 
     const script = document.createElement('script');
     script.src = 'https://www.youtube.com/iframe_api';
