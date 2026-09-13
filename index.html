@@ -1,136 +1,733 @@
-
 <!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
   <meta http-equiv="Cache-Control" content="no-cache">
   <title>YouTube品質調査TOOL</title>
+
   <style>
-    body { -webkit-text-size-adjust: 100%; font-family: sans-serif; }
-    .status { border: solid 1px #ccc; height: 20px; width: 600px; background: #eee; }
-    #log_text { border: solid 1px #ccc; height: 600px; width: 600px; background: #eee; font-size: 8pt; }
-    #video_url { width: 500px; }
+    body {
+      -webkit-text-size-adjust: 100%;
+      font-family: sans-serif;
+    }
+
+    .status {
+      border: solid 1px #ccc;
+      height: 20px;
+      width: 600px;
+      background: #eee;
+    }
+
+    #log_text {
+      border: solid 1px #ccc;
+      height: 600px;
+      width: 600px;
+      background: #eee;
+      font-size: 8pt;
+    }
+
+    #video_url {
+      width: 500px;
+    }
+
+    button {
+      margin: 4px;
+    }
   </style>
 </head>
+
 <body>
+
   <h1>YouTube品質調査TOOL</h1>
 
   <div>
     <label for="video_url">YouTube動画URL</label><br>
-    <input id="video_url" type="url" value="https://www.youtube.com/watch?v=VM18f-IIUTw" placeholder="https://www.youtube.com/watch?v=...">
-    <button type="button" onclick="loadVideoFromUrl()">この動画を読み込む</button>
+
+    <input
+      id="video_url"
+      type="url"
+      value="https://www.youtube.com/watch?v=VM18f-IIUTw"
+      placeholder="https://www.youtube.com/watch?v=..."
+    >
+
+    <button type="button" onclick="loadVideoFromUrl()">
+      この動画を読み込む
+    </button>
   </div>
+
   <p id="message" aria-live="polite"></p>
 
   <div id="ytplayer"></div>
+
   <p>
     <button type="button" onclick="startLoop()">START</button>
     <button type="button" onclick="stopLoop()">STOP</button>
   </p>
 
-  <div>現在時刻</div><div id="area1" class="status"></div>
-  <div>バッファ済みの動画の割合</div><div id="loaded" class="status"></div>
-  <div>プレーヤーの状態</div><div id="status" class="status"></div>
-  <div>再生開始からの経過時間</div><div id="time" class="status"></div>
-  <div>現在の画質</div><div id="current" class="status"></div>
-  <div>設定可能な画質</div><div id="levels" class="status"></div>
+  <div>現在時刻</div>
+  <div id="area1" class="status"></div>
+
+  <div>バッファ済みの動画の割合</div>
+  <div id="loaded" class="status"></div>
+
+  <div>プレーヤーの状態</div>
+  <div id="status" class="status"></div>
+
+  <div>再生開始からの経過時間</div>
+  <div id="time" class="status"></div>
+
+  <div>現在の画質</div>
+  <div id="current" class="status"></div>
+
+  <div>設定可能な画質</div>
+  <div id="levels" class="status"></div>
+
   <div>計測ログ</div>
+
   <textarea id="log_text" readonly></textarea><br>
-  <button type="button" onclick="copyLog()">ログをコピー</button>
+
+  <button type="button" onclick="copyLog()">
+    ログをコピー
+  </button>
+
+  <button type="button" onclick="downloadCSV()">
+    CSVを保存
+  </button>
+
+  <button type="button" onclick="shareCSV()">
+    CSVをメール/共有
+  </button>
+
+  <p id="share_message" aria-live="polite"></p>
+
 
   <script>
+
     let player;
     let intervalId;
-    let pendingVideoId = 'VM18f-IIUTw';
 
+    // デフォルト動画
+    const DEFAULT_VIDEO_ID = 'VM18f-IIUTw';
+
+    // ページを開いた時点でこの動画を読み込む
+    let pendingVideoId = DEFAULT_VIDEO_ID;
+
+    // CSV用の測定データ
+    const measurementLogs = [];
+
+
+    // YouTube IFrame API
     const script = document.createElement('script');
     script.src = 'https://www.youtube.com/iframe_api';
     document.head.appendChild(script);
 
+
+    // --------------------------------------------------
+    // YouTube URLから動画IDを取得
+    // --------------------------------------------------
+
     function getVideoId(url) {
+
       try {
+
         const parsed = new URL(url.trim());
-        if (parsed.hostname === 'youtu.be') return parsed.pathname.slice(1).split('/')[0];
-        if (parsed.hostname.endsWith('youtube.com')) {
-          return parsed.searchParams.get('v') || parsed.pathname.match(/^\/(?:embed|shorts|live)\/([^/?]+)/)?.[1] || '';
+
+        if (parsed.hostname === 'youtu.be') {
+          return parsed.pathname.slice(1).split('/')[0];
         }
-      } catch (_) { }
+
+        if (parsed.hostname.endsWith('youtube.com')) {
+
+          return (
+            parsed.searchParams.get('v') ||
+            parsed.pathname.match(
+              /^\/(?:embed|shorts|live)\/([^/?]+)/
+            )?.[1] ||
+            ''
+          );
+
+        }
+
+      } catch (_) {}
+
       return '';
     }
 
+
+    // --------------------------------------------------
+    // URLから動画を読み込む
+    // --------------------------------------------------
+
     function loadVideoFromUrl() {
+
       const url = document.getElementById('video_url').value;
+
       const videoId = getVideoId(url);
+
       if (!videoId) {
-        document.getElementById('message').textContent = '有効なYouTube動画URLを入力してください。';
+
+        document.getElementById('message').textContent =
+          '有効なYouTube動画URLを入力してください。';
+
         return;
       }
+
       pendingVideoId = videoId;
-      document.getElementById('message').textContent = '動画を読み込みました。';
-      if (player && player.loadVideoById) player.loadVideoById(videoId);
+
+      document.getElementById('message').textContent =
+        '動画を読み込みました。';
+
+      // 新しい動画を読み込んだら測定ログをリセット
+      measurementLogs.length = 0;
+
+      document.getElementById('log_text').value = '';
+
+      if (player && player.loadVideoById) {
+        player.loadVideoById(videoId);
+      }
     }
+
+
+    // --------------------------------------------------
+    // YouTube API準備完了
+    // --------------------------------------------------
 
     function onYouTubeIframeAPIReady() {
+
       player = new YT.Player('ytplayer', {
-        height: '360', width: '640',
-        playerVars: { playsinline: 1 },
-        events: { onReady: onPlayerReady, onStateChange: onPlayerStateChange }
+
+        height: '360',
+        width: '640',
+
+        playerVars: {
+          playsinline: 1
+        },
+
+        events: {
+          onReady: onPlayerReady,
+          onStateChange: onPlayerStateChange
+        }
+
       });
+
     }
+
+
+    // --------------------------------------------------
+    // プレーヤー準備完了
+    // --------------------------------------------------
 
     function onPlayerReady(event) {
-      if (pendingVideoId) event.target.loadVideoById(pendingVideoId);
+
+      if (pendingVideoId) {
+        event.target.loadVideoById(pendingVideoId);
+      }
+
     }
+
+
+    // --------------------------------------------------
+    // プレーヤー状態変更
+    // --------------------------------------------------
 
     function onPlayerStateChange(event) {
-      if (event.data === YT.PlayerState.BUFFERING || event.data === YT.PlayerState.PLAYING) {
+
+      if (
+        event.data === YT.PlayerState.BUFFERING ||
+        event.data === YT.PlayerState.PLAYING
+      ) {
+
         event.target.setPlaybackQuality('hd2160');
+
       }
+
       updateQualityInfo();
+
     }
+
+
+    // --------------------------------------------------
+    // START
+    // --------------------------------------------------
 
     function startLoop() {
-      if (!player || !player.playVideo) return;
+
+      if (!player || !player.playVideo) {
+        return;
+      }
+
       player.playVideo();
+
       clearInterval(intervalId);
+
       intervalId = setInterval(updateDisplay, 1000);
+
       updateDisplay();
+
     }
+
+
+    // --------------------------------------------------
+    // STOP
+    // --------------------------------------------------
 
     function stopLoop() {
-      if (player && player.pauseVideo) player.pauseVideo();
+
+      if (player && player.pauseVideo) {
+        player.pauseVideo();
+      }
+
       clearInterval(intervalId);
+
     }
+
+
+    // --------------------------------------------------
+    // 画面更新・ログ記録
+    // --------------------------------------------------
 
     function updateDisplay() {
+
+      if (!player) {
+        return;
+      }
+
       const now = new Date();
-      document.getElementById('area1').textContent = now.toString();
+
       const status = getPlayStatus();
+
       updateQualityInfo();
-      document.getElementById('log_text').value = `${now},${status}\n` + document.getElementById('log_text').value;
-      if (status === '終了' && player && player.playVideo) player.playVideo();
+
+
+      // 現在の測定値を取得
+
+      const loaded = player.getVideoLoadedFraction();
+
+      const loadedPercent =
+        Math.floor(loaded * 100);
+
+      const currentTime =
+        player.getCurrentTime();
+
+      const currentQuality =
+        player.getPlaybackQuality() || '';
+
+      const availableLevels =
+        player.getAvailableQualityLevels().join(' , ');
+
+
+      // 画面表示
+
+      document.getElementById('area1').textContent =
+        now.toString();
+
+      document.getElementById('loaded').textContent =
+        `${loadedPercent}%`;
+
+      document.getElementById('time').textContent =
+        `${currentTime}秒`;
+
+
+      // CSV用データに保存
+
+      measurementLogs.push({
+
+        timestamp: now.toISOString(),
+
+        loadedPercent: loadedPercent,
+
+        status: status,
+
+        currentTime: currentTime,
+
+        currentQuality: currentQuality,
+
+        availableLevels: availableLevels
+
+      });
+
+
+      // 画面上のログ
+
+      const logLine =
+        `${now},${status},${loadedPercent}%,${currentTime}秒,${currentQuality},${availableLevels}\n`;
+
+      document.getElementById('log_text').value =
+        logLine +
+        document.getElementById('log_text').value;
+
+
+      // 動画終了時は再生を再開
+
+      if (
+        status === '終了' &&
+        player &&
+        player.playVideo
+      ) {
+
+        player.playVideo();
+
+      }
+
     }
+
+
+    // --------------------------------------------------
+    // 再生状態取得
+    // --------------------------------------------------
 
     function getPlayStatus() {
-      if (!player || !player.getPlayerState) return '未開始';
-      const loaded = player.getVideoLoadedFraction();
-      document.getElementById('loaded').textContent = `${Math.floor(loaded * 100)}%`;
-      const names = { '-1': '未開始', 0: '終了', 1: '再生中', 2: '停止', 3: 'バッファリング中', 5: '頭出し済み' };
-      const status = names[player.getPlayerState()] || '不明';
-      document.getElementById('status').textContent = status;
-      document.getElementById('time').textContent = `${player.getCurrentTime()}秒`;
+
+      if (!player || !player.getPlayerState) {
+        return '未開始';
+      }
+
+      const loaded =
+        player.getVideoLoadedFraction();
+
+      document.getElementById('loaded').textContent =
+        `${Math.floor(loaded * 100)}%`;
+
+
+      const names = {
+
+        '-1': '未開始',
+        '0': '終了',
+        '1': '再生中',
+        '2': '停止',
+        '3': 'バッファリング中',
+        '5': '頭出し済み'
+
+      };
+
+
+      const status =
+        names[player.getPlayerState()] || '不明';
+
+
+      document.getElementById('status').textContent =
+        status;
+
+
+      document.getElementById('time').textContent =
+        `${player.getCurrentTime()}秒`;
+
+
       return status;
+
     }
+
+
+    // --------------------------------------------------
+    // 画質情報更新
+    // --------------------------------------------------
 
     function updateQualityInfo() {
-      if (!player || !player.getVideoLoadedFraction || player.getVideoLoadedFraction() <= 0) return;
-      document.getElementById('levels').textContent = player.getAvailableQualityLevels().join(' , ');
-      document.getElementById('current').textContent = player.getPlaybackQuality();
+
+      if (
+        !player ||
+        !player.getVideoLoadedFraction ||
+        player.getVideoLoadedFraction() <= 0
+      ) {
+
+        return;
+
+      }
+
+
+      document.getElementById('levels').textContent =
+        player.getAvailableQualityLevels().join(' , ');
+
+
+      document.getElementById('current').textContent =
+        player.getPlaybackQuality();
+
     }
 
-    async function copyLog() {
-      await navigator.clipboard.writeText(document.getElementById('log_text').value);
+
+    // --------------------------------------------------
+    // CSV用エスケープ
+    // --------------------------------------------------
+
+    function csvEscape(value) {
+
+      const text = String(value ?? '');
+
+      // カンマ、改行、ダブルクォートを含む場合は
+      // ダブルクォートで囲む
+      if (
+        text.includes(',') ||
+        text.includes('"') ||
+        text.includes('\n') ||
+        text.includes('\r')
+      ) {
+
+        return '"' +
+          text.replace(/"/g, '""') +
+          '"';
+
+      }
+
+      return text;
+
     }
+
+
+    // --------------------------------------------------
+    // CSV生成
+    // --------------------------------------------------
+
+    function createCSV() {
+
+      const headers = [
+
+        '動画URL',
+        '時刻',
+        'バッファ済み割合',
+        'プレーヤー状態',
+        '経過時間(秒)',
+        '現在の画質',
+        '設定可能な画質'
+
+      ];
+
+
+      const videoUrl =
+        document.getElementById('video_url').value;
+
+
+      const rows = measurementLogs.map(log => [
+
+        videoUrl,
+        log.timestamp,
+        `${log.loadedPercent}%`,
+        log.status,
+        log.currentTime,
+        log.currentQuality,
+        log.availableLevels
+
+      ]);
+
+
+      const csvRows = [
+
+        headers,
+
+        ...rows
+
+      ].map(row =>
+        row.map(csvEscape).join(',')
+      );
+
+
+      // UTF-8 BOMを付ける
+      // → Excelで日本語が文字化けしにくい
+
+      return '\uFEFF' + csvRows.join('\r\n');
+
+    }
+
+
+    // --------------------------------------------------
+    // ファイル名
+    // --------------------------------------------------
+
+    function getCSVFileName() {
+
+      const now = new Date();
+
+      const pad = n =>
+        String(n).padStart(2, '0');
+
+      const fileName =
+
+        `YouTube品質調査_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.csv`;
+
+      return fileName;
+
+    }
+
+
+    // --------------------------------------------------
+    // CSV保存
+    // --------------------------------------------------
+
+    function downloadCSV() {
+
+      if (measurementLogs.length === 0) {
+
+        alert('まだ測定ログがありません。STARTしてからCSVを作成してください。');
+
+        return;
+
+      }
+
+
+      const csv = createCSV();
+
+      const blob = new Blob(
+        [csv],
+        {
+          type: 'text/csv;charset=utf-8'
+        }
+      );
+
+
+      const url =
+        URL.createObjectURL(blob);
+
+
+      const a =
+        document.createElement('a');
+
+      a.href = url;
+
+      a.download =
+        getCSVFileName();
+
+      document.body.appendChild(a);
+
+      a.click();
+
+      a.remove();
+
+      URL.revokeObjectURL(url);
+
+    }
+
+
+    // --------------------------------------------------
+    // CSVをWeb Share APIで共有
+    // --------------------------------------------------
+
+    async function shareCSV() {
+
+      if (measurementLogs.length === 0) {
+
+        alert(
+          'まだ測定ログがありません。STARTしてからCSVを作成してください。'
+        );
+
+        return;
+
+      }
+
+
+      const csv = createCSV();
+
+
+      const file = new File(
+
+        [csv],
+
+        getCSVFileName(),
+
+        {
+          type: 'text/csv'
+        }
+
+      );
+
+
+      const shareData = {
+
+        files: [file],
+
+        title: 'YouTube品質調査ログ',
+
+        text: 'YouTube品質調査のCSVログです。'
+
+      };
+
+
+      // Web Share API自体がない場合
+
+      if (
+        !navigator.share ||
+        !navigator.canShare
+      ) {
+
+        document.getElementById('share_message').textContent =
+          'このブラウザでは共有機能に対応していないため、CSVを保存します。';
+
+        downloadCSV();
+
+        return;
+
+      }
+
+
+      // CSVファイルを共有できるか確認
+
+      if (!navigator.canShare({ files: [file] })) {
+
+        document.getElementById('share_message').textContent =
+          'この環境ではCSVファイルの共有に対応していないため、CSVを保存します。';
+
+        downloadCSV();
+
+        return;
+
+      }
+
+
+      try {
+
+        document.getElementById('share_message').textContent =
+          '共有先を選択してください。';
+
+
+        await navigator.share(shareData);
+
+
+        document.getElementById('share_message').textContent =
+          '共有しました。';
+
+      }
+
+      catch (error) {
+
+        // ユーザーが共有画面を閉じただけなら
+        // エラー扱いにしない
+
+        if (error.name === 'AbortError') {
+
+          document.getElementById('share_message').textContent =
+            '共有をキャンセルしました。';
+
+          return;
+
+        }
+
+
+        console.error(error);
+
+
+        document.getElementById('share_message').textContent =
+          '共有できなかったため、CSVを保存します。';
+
+        downloadCSV();
+
+      }
+
+    }
+
+
+    // --------------------------------------------------
+    // ログをコピー
+    // --------------------------------------------------
+
+    async function copyLog() {
+
+      await navigator.clipboard.writeText(
+
+        document.getElementById('log_text').value
+
+      );
+
+    }
+
   </script>
+
 </body>
 </html>
